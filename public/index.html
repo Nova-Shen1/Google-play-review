@@ -1,0 +1,1977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>谷歌Play尼日利亚区App差评AI分析系统</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Font Awesome (图标) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Toast 通知样式 */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            padding: 10px 20px;
+            background: rgba(30, 41, 59, 0.95);
+            color: white;
+            border-radius: 8px;
+            font-size: 14px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 3.7s forwards;
+            opacity: 0;
+            pointer-events: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(8px);
+            display: flex;
+            items-center: center;
+            gap: 8px;
+            min-width: 200px;
+            justify-content: center;
+        }
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
+        @keyframes toast-in {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes toast-out {
+            from { transform: translateY(0); opacity: 1; }
+            to { transform: translateY(-20px); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 h-screen flex overflow-hidden">
+    <!-- Toast 容器 -->
+    <div id="toast-container"></div>
+
+    <!-- 左侧边栏 -->
+    <aside class="w-64 bg-slate-800 text-white flex flex-col flex-shrink-0 transition-all duration-300">
+        <div class="p-6 border-b border-slate-700">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <i class="fa-brands fa-google-play text-green-400"></i>
+                <span data-i18n="title">GP差评分析</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-1"><span id="sidebar-country-name">尼日利亚</span>区 • AI监控</p>
+        </div>
+
+        <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <button onclick="app.switchView('dashboard')" id="nav-dashboard" class="w-full text-left px-4 py-3 rounded-lg bg-slate-700 hover:bg-slate-600 transition flex items-center gap-3">
+                <i class="fa-solid fa-chart-pie"></i> <span data-i18n="dashboard">分析仪表板</span>
+            </button>
+            <button onclick="app.switchView('apps')" id="nav-apps" class="w-full text-left px-4 py-3 rounded-lg hover:bg-slate-700 transition flex items-center gap-3">
+                <i class="fa-solid fa-mobile-screen"></i> <span data-i18n="apps">App 管理</span>
+            </button>
+            
+            <div class="mt-8 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider" data-i18n="currentRegion">当前区域与选择</div>
+            <div class="mt-2 px-4">
+                <select id="country-selector" onchange="app.changeCountry(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-300 outline-none focus:border-blue-500">
+                    <option value="ng">🇳🇬 尼日利亚 (Nigeria)</option>
+                    <option value="mx">🇲🇽 墨西哥 (Mexico)</option>
+                    <option value="ph">🇵🇭 菲律宾 (Philippines)</option>
+                </select>
+            </div>
+            <div id="current-app-display" class="mt-2 px-4 py-2 bg-slate-900/50 rounded border border-slate-700 text-sm text-slate-300 truncate">
+                未选择
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-slate-700 text-xs text-center text-slate-500">
+            <div>API Mode: <span id="api-mode-indicator" class="font-bold text-yellow-400">MOCK</span></div>
+            <div class="mt-1">v1.1.0</div>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <!-- 顶部栏 -->
+        <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex justify-between items-center z-10">
+            <h2 id="page-title" class="text-xl font-semibold text-gray-800" data-i18n="dashboard">分析仪表板</h2>
+            <div class="flex items-center gap-4">
+                <!-- 语言切换按钮 -->
+                <div class="flex bg-gray-100 p-1 rounded-lg border mr-2">
+                    <button onclick="app.setLanguage('zh')" id="lang-zh" class="px-3 py-1 rounded-md text-xs transition font-bold bg-white shadow-sm text-blue-600">中</button>
+                    <button onclick="app.setLanguage('en')" id="lang-en" class="px-3 py-1 rounded-md text-xs transition font-bold text-gray-500 hover:text-gray-700">EN</button>
+                </div>
+                
+                <div class="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1 rounded-full border">
+                    <i class="fa-regular fa-calendar"></i>
+                    <span id="current-date">2023-10-27</span>
+                </div>
+                <button onclick="app.toggleSettings(true)" class="text-gray-600 hover:text-blue-600 transition" title="API 设置">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+                <button onclick="app.toggleApiMode()" class="text-xs flex items-center gap-1 px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border transition">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span id="api-mode-text" data-i18n="realMode">谷歌真实评论模式</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- 内容滚动区 -->
+        <div class="flex-1 overflow-auto p-6 relative">
+            
+            <!-- 视图：仪表板 -->
+            <div id="view-dashboard" class="space-y-6">
+                <!-- 操作栏 -->
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div id="app-checkbox-list" class="flex flex-wrap gap-3 max-h-32 overflow-y-auto p-2 border rounded-lg min-w-[300px] bg-gray-50">
+                            <!-- Checkboxes will be injected here -->
+                        </div>
+                        <button onclick="app.fetchReviews()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> <span data-i18n="fetchReviews">获取往期差评 (T-2)</span>
+                        </button>
+                        <button onclick="app.analyzeReviews()" id="btn-analyze" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> <span data-i18n="startAnalyze">开始AI分析</span>
+                        </button>
+                    </div>
+                    <div id="status-msg" class="text-sm text-gray-500 italic" data-i18n="statusWaiting">等待操作...</div>
+                </div>
+
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                        <div class="text-gray-500 text-sm" data-i18n="statTotal">获取差评数</div>
+                        <div class="text-2xl font-bold mt-1" id="stat-total">0</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                        <div class="text-gray-500 text-sm" data-i18n="statIssue">主要问题</div>
+                        <div class="text-2xl font-bold mt-1 text-red-600" id="stat-top-issue">-</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                        <div class="text-gray-500 text-sm" data-i18n="statAvg">平均评分</div>
+                        <div class="text-2xl font-bold mt-1 text-yellow-500" id="stat-avg-score">-</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                        <div class="text-gray-500 text-sm" data-i18n="statConf">AI 置信度</div>
+                        <div class="text-2xl font-bold mt-1 text-green-600" id="stat-confidence">-</div>
+                    </div>
+                </div>
+
+                <!-- 新增：汇总统计表格区 -->
+                <div id="summary-section" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+                    <div class="bg-yellow-100 p-3 text-center border-b border-gray-200">
+                        <h3 class="font-bold text-gray-800" id="summary-title">近7天谷歌差评情况</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-center border-collapse">
+                            <thead>
+                                <tr class="bg-lime-500 text-white font-bold">
+                                    <th class="p-2 border border-gray-200" data-i18n="tableApp">APP</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableScore">评分</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableBadCount">差评数</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableTotal">总数</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableBadRate">差评率</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableViol">违规催收</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableAmt">额度不满</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableInt">利息不满</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableForce">强领</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableRej">拒贷</th>
+                                    <th class="p-2 border border-gray-200" data-i18n="tableOther">其他</th>
+                                </tr>
+                            </thead>
+                            <tbody id="summary-table-body">
+                                <!-- Summary data will be injected here -->
+                            </tbody>
+                            <tfoot id="summary-table-footer-container">
+                                <tr id="summary-table-footer" class="bg-yellow-50 font-bold">
+                                    <!-- Footer totals will be injected here -->
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <div class="p-3 bg-gray-50 flex justify-end gap-2">
+                        <button onclick="app.copySummaryTable()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-medium transition flex items-center gap-2">
+                            <i class="fa-solid fa-copy"></i> <span data-i18n="copy">复制表格</span>
+                        </button>
+                        <button onclick="app.exportSummaryCSV()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm font-medium transition flex items-center gap-2">
+                            <i class="fa-solid fa-file-export"></i> <span data-i18n="export">导出汇总CSV</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 图表区 -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 lg:col-span-1">
+                        <h3 class="font-bold text-gray-700 mb-4" data-i18n="statIssue">主要问题</h3>
+                        <div class="relative h-64 w-full flex justify-center">
+                            <canvas id="chart-categories"></canvas>
+                        </div>
+                        
+                        <!-- 4-5星好评存留率列表 -->
+                        <div class="mt-8 pt-6 border-t border-gray-100">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="font-bold text-gray-700" data-i18n="statRetention">4-5星好评存留率</h3>
+                                <span class="text-[10px] text-gray-400">近7天数据对比</span>
+                            </div>
+                            <div id="retention-list-container" class="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-1">
+                                <!-- 各 App 存留率将动态注入 -->
+                                <div class="text-xl font-bold text-gray-300 italic">等待数据...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 lg:col-span-2 flex flex-col">
+                        <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+                            <div class="flex items-center gap-3">
+                                <h3 class="font-bold text-gray-700" data-i18n="tableReview">评论内容</h3>
+                                <!-- 筛选器 -->
+                                <div class="flex items-center gap-2">
+                                    <!-- 评分多选 -->
+                                    <div class="relative">
+                                        <button onclick="app.toggleRatingDropdown(event)" class="text-xs border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 flex items-center gap-2 min-w-[80px]">
+                                            <span id="rating-filter-label" data-i18n="filterRating">所有评分</span>
+                                            <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                                        </button>
+                                        <div id="rating-dropdown" class="hidden absolute left-0 mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2">
+                                            <div class="flex flex-col gap-1">
+                                                <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                                                    <input type="checkbox" value="5" onchange="app.handleRatingToggle(this)" class="rounded text-blue-600 w-3 h-3">
+                                                    <span class="text-xs text-gray-700">5 ⭐</span>
+                                                </label>
+                                                <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                                                    <input type="checkbox" value="4" onchange="app.handleRatingToggle(this)" class="rounded text-blue-600 w-3 h-3">
+                                                    <span class="text-xs text-gray-700">4 ⭐</span>
+                                                </label>
+                                                <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                                                    <input type="checkbox" value="3" onchange="app.handleRatingToggle(this)" class="rounded text-blue-600 w-3 h-3">
+                                                    <span class="text-xs text-gray-700">3 ⭐</span>
+                                                </label>
+                                                <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                                                    <input type="checkbox" value="2" onchange="app.handleRatingToggle(this)" class="rounded text-blue-600 w-3 h-3">
+                                                    <span class="text-xs text-gray-700">2 ⭐</span>
+                                                </label>
+                                                <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                                                    <input type="checkbox" value="1" onchange="app.handleRatingToggle(this)" class="rounded text-blue-600 w-3 h-3">
+                                                    <span class="text-xs text-gray-700">1 ⭐</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- App 多选 -->
+                                    <div class="relative">
+                                        <button onclick="app.toggleAppFilterDropdown(event)" class="text-xs border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 flex items-center gap-2 min-w-[100px] max-w-[150px]">
+                                            <span id="app-filter-label" class="truncate" data-i18n="filterApp">所有 App</span>
+                                            <i class="fa-solid fa-chevron-down text-[10px] flex-shrink-0"></i>
+                                        </button>
+                                        <div id="app-filter-dropdown" class="hidden absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2">
+                                            <div id="app-filter-list" class="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                                                <!-- App options will be injected here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- 时间多选 -->
+                                    <div class="relative">
+                                        <button onclick="app.toggleDateFilterDropdown(event)" class="text-xs border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 bg-gray-50 flex items-center gap-2 min-w-[100px] max-w-[150px]">
+                                            <span id="date-filter-label" class="truncate" data-i18n="filterDate">所有时间</span>
+                                            <i class="fa-solid fa-chevron-down text-[10px] flex-shrink-0"></i>
+                                        </button>
+                                        <div id="date-filter-dropdown" class="hidden absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2">
+                                            <div id="date-filter-list" class="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                                                <!-- Date options will be injected here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button onclick="app.exportData()" class="text-blue-600 text-sm hover:underline" data-i18n="export">导出CSV</button>
+                        </div>
+                        <div class="flex-1 overflow-auto border rounded-lg">
+                            <table class="w-full text-left text-sm">
+                                <thead class="bg-gray-50 text-gray-600 sticky top-0">
+                                    <tr>
+                                        <th class="p-3 font-medium" data-i18n="tableScore">评分</th>
+                                        <th class="p-3 font-medium">App</th>
+                                        <th class="p-3 font-medium" data-i18n="tableUser">用户名</th>
+                                        <th class="p-3 font-medium w-1/3" data-i18n="tableReview">评论内容</th>
+                                        <th class="p-3 font-medium" data-i18n="tableCategory">AI 分类</th>
+                                        <th class="p-3 font-medium" data-i18n="tableConfidence">置信度</th>
+                                        <th class="p-3 font-medium" data-i18n="tableTime">时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reviews-table-body" class="divide-y divide-gray-100">
+                                    <tr>
+                                        <td colspan="7" class="p-8 text-center text-gray-400" data-i18n="noData">暂无数据，请先获取评论</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <!-- 分页器 -->
+                        <div id="pagination-controls" class="flex justify-between items-center mt-4 text-xs text-gray-500">
+                            <span id="pagination-info">Page 1 / 1</span>
+                            <div class="flex gap-2">
+                                <button onclick="app.changePage(-1)" id="btn-prev-page" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" data-i18n="prevPage">上一页</button>
+                                <button onclick="app.changePage(1)" id="btn-next-page" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50" data-i18n="nextPage">下一页</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 视图：App 管理 -->
+            <div id="view-apps" class="hidden space-y-6 max-w-4xl mx-auto">
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold" data-i18n="apps">App 管理</h3>
+                        <div class="flex bg-gray-100 p-1 rounded-lg">
+                            <button onclick="app.changeCountry('ng')" id="app-tab-ng" class="px-4 py-1.5 rounded-md text-sm transition font-medium">🇳🇬 尼日利亚</button>
+                            <button onclick="app.changeCountry('mx')" id="app-tab-mx" class="px-4 py-1.5 rounded-md text-sm transition font-medium">🇲🇽 墨西哥</button>
+                            <button onclick="app.changeCountry('ph')" id="app-tab-ph" class="px-4 py-1.5 rounded-md text-sm transition font-medium">🇵🇭 菲律宾</button>
+                        </div>
+                    </div>
+                    
+                    <form onsubmit="app.addApp(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 border-t pt-4">
+                        <input type="text" name="appName" placeholder="App 名称" required class="border rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm" data-i18n-placeholder="appName">
+                        <input type="text" name="appId" placeholder="App ID" required class="border rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-sm" data-i18n-placeholder="appId">
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition text-sm">
+                            <i class="fa-solid fa-plus"></i> <span data-i18n="addApp">添加到当前区域</span>
+                        </button>
+                    </form>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <h3 class="text-lg font-bold mb-4" id="app-list-title"><span data-i18n="appList">已监控 App 列表</span> (<span id="appList-country-name">尼日利亚</span>)</h3>
+                    <div id="app-list" class="space-y-3">
+                        <!-- App items will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform transition-all">
+            <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800">
+                <i class="fa-solid fa-gear text-blue-600"></i> <span data-i18n="apiConfig">API 配置</span>
+            </h3>
+            <p class="text-sm text-gray-500 mb-4" data-i18n="apiConfigDesc">配置后端服务地址以连接真实数据。</p>
+            <form onsubmit="app.saveSettings(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" data-i18n="apiBaseUrl">后端 API 地址 (Base URL)</label>
+                    <div class="flex gap-2">
+                        <input type="url" name="apiBaseUrl" id="setting-api-url" placeholder="http://localhost:3000" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none transition">
+                        <button type="button" onclick="app.testConnection()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg border border-gray-300 transition text-sm whitespace-nowrap">
+                            <i class="fa-solid fa-plug"></i> <span data-i18n="test">测试</span>
+                        </button>
+                    </div>
+                    <div id="connection-status" class="text-xs mt-2 hidden"></div>
+                    <p class="text-xs text-gray-500 mt-1" data-i18n="apiEmptyHint">留空则自动连接到当前服务器地址。</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" data-i18n="apiKeyLabel">API Key (可选)</label>
+                    <input type="password" name="apiKey" id="setting-api-key" placeholder="如需认证请填写" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none transition" data-i18n-placeholder="apiKeyPlaceholder">
+                </div>
+                <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+                    <button type="button" onclick="app.toggleSettings(false)" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition" data-i18n="cancel">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition" data-i18n="save">保存配置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript 逻辑 -->
+    <script>
+        /**
+         * 全局配置与状态
+         */
+        const CONFIG = {
+            lang: 'zh', // 'zh' or 'en'
+            useMockData: false, 
+            apiBaseUrl: window.location.origin, 
+            apiKey: '',
+            i18n: {
+                zh: {
+                    title: "GP差评分析",
+                    dashboard: "分析仪表板",
+                    apps: "App 管理",
+                    currentRegion: "当前区域与选择",
+                    unselected: "未选择",
+                    fetchReviews: "获取往期评论 (T-2)",
+                    startAnalyze: "开始AI分析",
+                    statusWaiting: "等待操作...",
+                    statTotal: "获取评论数",
+                    statIssue: "主要问题",
+                    statAvg: "平均评分",
+                    statConf: "AI 置信度",
+                    statRetention: "4-5星好评存留率",
+                    statRetentionDesc: "对比基准日期: {date}",
+                    statCollecting: "正在累积数据...",
+                    summaryTitle: "近7天谷歌差评情况",
+                    tableApp: "APP",
+                    tableScore: "评分",
+                    tableBadCount: "差评数",
+                    tableTotal: "总数",
+                    tableBadRate: "差评率",
+                    tableViol: "违规催收",
+                    tableAmt: "额度不满",
+                    tableInt: "利息不满",
+                    tableForce: "强领",
+                    tableRej: "拒贷",
+                    tableOther: "其他",
+                    tableReview: "评论内容",
+                    tableCategory: "AI分类",
+                    tableConfidence: "置信度",
+                    tableTime: "时间",
+                    tableUser: "用户",
+                    export: "导出 CSV",
+                    copy: "复制表格",
+                    filterRating: "所有评分",
+                    filterApp: "所有 App",
+                    filterDate: "所有时间",
+                    prevPage: "上一页",
+                    nextPage: "下一页",
+                    pageInfo: "第 {current} / {total} 页",
+                    realMode: "谷歌真实评论模式",
+                    mockMode: "模拟测试模式",
+                    settings: "API 设置",
+                    addApp: "添加到当前区域",
+                    appList: "已监控 App 列表",
+                    appName: "App 名称",
+                    appId: "App ID",
+                    save: "保存配置",
+                    cancel: "取消",
+                    test: "测试",
+                    connecting: "正在连接...",
+                    success: "连接成功！",
+                    fail: "连接失败",
+                    noData: "暂无数据",
+                    apiConfig: "API 配置",
+                    apiConfigDesc: "配置后端服务地址以连接真实数据。",
+                    apiBaseUrl: "后端 API 地址 (Base URL)",
+                    apiKeyLabel: "API Key (可选)",
+                    apiKeyPlaceholder: "如需认证请填写",
+                    apiEmptyHint: "留空则自动连接到当前服务器地址。",
+                    toastAddFail: "添加失败",
+                    toastDeleteFail: "删除失败",
+                    toastNetworkError: "请检查网络连接",
+                    toastApiFail: "API 连接失败",
+                    toastAiFail: "AI 分析服务连接失败",
+                    toastSaveSuccess: "配置已保存",
+                    unknownError: "未知错误",
+                    timeoutError: "请求超时 (60秒)。",
+                    monitoringSuffix: "区 • AI监控",
+                    toastSelectApp: "请先选择一个或多个 App",
+                    toastFetching: "正在获取评论数据...",
+                    toastFetchingApp: "正在获取 [{appName}] 的数据...",
+                    toastAnalyzing: "AI 正在分析评论语义...",
+                    toastAddSuccess: "App 添加成功",
+                    toastCopySuccess: "表格已复制到剪贴板，可直接粘贴到 Excel 或飞书",
+                    toastCopyFail: "复制失败，请手动选择表格内容复制",
+                    statusPending: "待分析",
+                    unknown: "未知",
+                    user: "用户"
+                },
+                en: {
+                    title: "GP Review AI",
+                    dashboard: "Dashboard",
+                    apps: "App Manager",
+                    currentRegion: "Region & Selection",
+                    unselected: "Unselected",
+                    fetchReviews: "Fetch Reviews (T-2)",
+                    startAnalyze: "Start AI Analysis",
+                    statusWaiting: "Waiting...",
+                    statTotal: "Total Reviews Fetched",
+                    statIssue: "Top Issue",
+                    statAvg: "Avg Rating",
+                    statConf: "AI Confidence",
+                    statRetention: "4-5 Star Retention",
+                    statRetentionDesc: "Base Date: {date}",
+                    statCollecting: "Collecting data...",
+                    summaryTitle: "7-Day Google Reviews Summary",
+                    tableApp: "App",
+                    tableScore: "Score",
+                    tableBadCount: "Bad Count",
+                    tableTotal: "Total",
+                    tableBadRate: "Bad Rate",
+                    tableViol: "Collection",
+                    tableAmt: "Limit",
+                    tableInt: "Interest",
+                    tableForce: "Force Loan",
+                    tableRej: "Rejected",
+                    tableOther: "Other",
+                    tableReview: "Review Content",
+                    tableCategory: "AI Category",
+                    tableConfidence: "Confidence",
+                    tableTime: "Time",
+                    tableUser: "User",
+                    export: "Export CSV",
+                    copy: "Copy Table",
+                    filterRating: "All Ratings",
+                    filterApp: "All Apps",
+                    filterDate: "All Dates",
+                    prevPage: "Prev",
+                    nextPage: "Next",
+                    pageInfo: "Page {current} / {total}",
+                    realMode: "Real API Mode",
+                    mockMode: "Mock Test Mode",
+                    settings: "API Settings",
+                    addApp: "Add to Current Region",
+                    appList: "Monitored App List",
+                    appName: "App Name",
+                    appId: "App ID",
+                    save: "Save Settings",
+                    cancel: "Cancel",
+                    test: "Test",
+                    connecting: "Connecting...",
+                    success: "Success!",
+                    fail: "Failed",
+                    noData: "No Data",
+                    apiConfig: "API Configuration",
+                    apiConfigDesc: "Configure the backend service address to connect to real data.",
+                    apiBaseUrl: "Backend API Address (Base URL)",
+                    apiKeyLabel: "API Key (Optional)",
+                    apiKeyPlaceholder: "Fill in if authentication is required",
+                    apiEmptyHint: "Leave blank to automatically connect to the current server address.",
+                    toastAddFail: "Add failed",
+                    toastDeleteFail: "Delete failed",
+                    toastNetworkError: "Please check network connection",
+                    toastApiFail: "API connection failed",
+                    toastAiFail: "AI analysis service failed",
+                    toastSaveSuccess: "Settings saved",
+                    unknownError: "Unknown error",
+                    timeoutError: "Request timeout (60s).",
+                    monitoringSuffix: " • AI Monitoring",
+                    toastSelectApp: "Please select one or more apps",
+                    toastFetching: "Fetching review data...",
+                    toastFetchingApp: "Fetching data for [{appName}]...",
+                    toastAnalyzing: "AI is analyzing reviews...",
+                    toastAddSuccess: "App added successfully",
+                    toastCopySuccess: "Table copied to clipboard",
+                    toastCopyFail: "Copy failed, please copy manually",
+                    statusPending: "Pending",
+                    unknown: "Unknown",
+                    user: "User"
+                }
+            },
+            defaultApps: [
+                { name: 'FairMoney', id: 'com.fairmoney.android' },
+                { name: 'Palmcredit', id: 'com.palmcredit.finance.money.loan.credit.cash' }
+            ],
+            defaultAppsByCountry: {
+                'ng': [
+                    { name: 'FairMoney', id: 'com.fairmoney.android' },
+                    { name: 'Palmcredit', id: 'com.palmcredit.finance.money.loan.credit.cash' }
+                ],
+                'mx': [
+                    { name: 'RápidoCrédito', id: 'com.rapido.credito.cash.rttsa' }
+                ],
+                'ph': []
+            },
+            categories: [
+                { id: 'viol', i18nKey: 'tableViol', color: '#ef4444' }, // Red
+                { id: 'amt', i18nKey: 'tableAmt', color: '#f59e0b' },  // Amber
+                { id: 'int', i18nKey: 'tableInt', color: '#8b5cf6' },  // Violet
+                { id: 'force', i18nKey: 'tableForce', color: '#ec4899' },    // Pink
+                { id: 'rej', i18nKey: 'tableRej', color: '#64748b' },      // Slate
+                { id: 'other', i18nKey: 'tableOther', color: '#94a3b8' }     // Gray
+            ]
+        };
+
+        const STATE = {
+            appsByCountry: {
+                'ng': [],
+                'mx': [],
+                'ph': []
+            },
+            selectedAppIds: [],
+            currentCountry: 'ng',
+            reviews: [],
+            appStats: {}, 
+            summaryData: [], 
+            chartInstance: null,
+            // 筛选与分页
+            filterRatings: [], // Empty means all
+            filterAppIds: [], // Empty means all
+            filterDates: [], // 时间多选筛选
+            currentPage: 1,
+            pageSize: 20,
+            // 缓存不同国家的数据，避免切换时丢失
+            cache: {
+                'ng': { reviews: [], appStats: {}, selectedAppIds: [] },
+                'mx': { reviews: [], appStats: {}, selectedAppIds: [] },
+                'ph': { reviews: [], appStats: {}, selectedAppIds: [] }
+            }
+        };
+
+        const COUNTRY_NAMES = {
+            zh: {
+                'ng': '尼日利亚',
+                'mx': '墨西哥',
+                'ph': '菲律宾'
+            },
+            en: {
+                'ng': 'Nigeria',
+                'mx': 'Mexico',
+                'ph': 'Philippines'
+            }
+        };
+
+        const COUNTRY_LANGS = {
+            'ng': 'en',
+            'mx': 'es',
+            'ph': 'en,fil'
+        };
+
+        // ==========================================
+        // 核心逻辑类
+        // ==========================================
+
+        class AppManager {
+            constructor() {
+                this.init();
+            }
+
+            async init() {
+                try {
+                    const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                    const res = await fetch(`${baseUrl}/api/apps`);
+                    if (res.ok) {
+                        STATE.appsByCountry = await res.json();
+                    } else {
+                        console.error('Failed to fetch apps from server');
+                        STATE.appsByCountry = JSON.parse(JSON.stringify(CONFIG.defaultAppsByCountry));
+                    }
+                } catch (e) {
+                    console.error('Error initializing AppManager:', e);
+                    STATE.appsByCountry = JSON.parse(JSON.stringify(CONFIG.defaultAppsByCountry));
+                }
+                this.renderList();
+                this.updateSelector();
+            }
+
+            async add(name, id, country) {
+                const targetCountry = country || STATE.currentCountry;
+                try {
+                    const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                    const res = await fetch(`${baseUrl}/api/apps`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, id, country: targetCountry })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        STATE.appsByCountry = data.apps;
+                        this.renderList();
+                        this.updateSelector();
+                    } else {
+                        const err = await res.json();
+                        const msg = CONFIG.i18n[CONFIG.lang].toastAddFail;
+                        const unknown = CONFIG.i18n[CONFIG.lang].unknownError;
+                        showToast(`${msg}: ${err.error || unknown}`, 'error');
+                    }
+                } catch (e) {
+                    console.error('Error adding app:', e);
+                    showToast(CONFIG.i18n[CONFIG.lang].toastNetworkError, 'error');
+                }
+            }
+
+            async remove(id, country) {
+                const targetCountry = country || STATE.currentCountry;
+                try {
+                    const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                    const res = await fetch(`${baseUrl}/api/apps/${targetCountry}/${id}`, {
+                        method: 'DELETE'
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        STATE.appsByCountry = data.apps;
+                        this.renderList();
+                        this.updateSelector();
+                        if (STATE.selectedAppIds && STATE.selectedAppIds.includes(id)) {
+                            STATE.selectedAppIds = STATE.selectedAppIds.filter(x => x !== id);
+                            app.updateSelectedDisplay();
+                        }
+                    } else {
+                        const err = await res.json();
+                        const msg = CONFIG.i18n[CONFIG.lang].toastDeleteFail;
+                        const unknown = CONFIG.i18n[CONFIG.lang].unknownError;
+                        showToast(`${msg}: ${err.error || unknown}`, 'error');
+                    }
+                } catch (e) {
+                    console.error('Error removing app:', e);
+                    showToast(CONFIG.i18n[CONFIG.lang].toastNetworkError, 'error');
+                }
+            }
+
+            renderList() {
+                this.updateTabs();
+                const container = document.getElementById('app-list');
+                if (!container) return;
+                const apps = STATE.appsByCountry[STATE.currentCountry] || [];
+                
+                container.innerHTML = apps.map(app => `
+                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                                ${app.name.charAt(0)}
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">${app.name}</div>
+                                <div class="text-xs text-gray-500">${app.id}</div>
+                            </div>
+                        </div>
+                        <button onclick="appManager.remove('${app.id}')" class="text-red-500 hover:bg-red-50 p-2 rounded-lg transition">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `).join('');
+
+                // 更新列表标题
+                const listTitle = document.getElementById('app-list-title');
+                if (listTitle) {
+                    const countryName = (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][STATE.currentCountry]) || 
+                                       (COUNTRY_NAMES['zh'][STATE.currentCountry]) || 
+                                       STATE.currentCountry;
+                    const listText = CONFIG.i18n[CONFIG.lang].appList;
+                    listTitle.innerHTML = `<span data-i18n="appList">${listText}</span> (${countryName})`;
+                }
+            }
+
+            updateTabs() {
+                ['ng', 'mx', 'ph'].forEach(c => {
+                    const tab = document.getElementById(`app-tab-${c}`);
+                    if (tab) {
+                        // 更新文本内容 (包含国旗图标)
+                        const flags = { 'ng': '🇳🇬', 'mx': '🇲🇽', 'ph': '🇵🇭' };
+                        const name = (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][c]) || 
+                                     (COUNTRY_NAMES['zh'][c]) || c;
+                        tab.textContent = `${flags[c]} ${name}`;
+
+                        if (c === STATE.currentCountry) {
+                            tab.classList.add('bg-white', 'shadow-sm', 'text-blue-600');
+                            tab.classList.remove('text-gray-500');
+                        } else {
+                            tab.classList.remove('bg-white', 'shadow-sm', 'text-blue-600');
+                            tab.classList.add('text-gray-500');
+                        }
+                    }
+                });
+            }
+
+            updateSelector() {
+                const container = document.getElementById('app-checkbox-list');
+                if (!container) return;
+                const apps = STATE.appsByCountry[STATE.currentCountry] || [];
+                
+                container.innerHTML = apps.map(a => `
+                    <label class="flex items-center gap-2 px-3 py-1.5 bg-white border rounded-full cursor-pointer hover:bg-blue-50 transition border-gray-200 text-sm">
+                        <input type="checkbox" value="${a.id}" 
+                               ${STATE.selectedAppIds.includes(a.id) ? 'checked' : ''}
+                               onchange="app.handleAppSelect(this)"
+                               class="rounded text-blue-600 focus:ring-blue-500 w-4 h-4">
+                        <span class="text-gray-700">${a.name}</span>
+                    </label>
+                `).join('');
+
+                if (apps.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-xs p-2">当前区域暂无监控 App，请前往管理页面添加</div>';
+                }
+            }
+        }
+
+        class ReviewFetcher {
+            async fetch(appId) {
+                if (CONFIG.useMockData) return this.mockFetch(appId);
+                return this.realFetch(appId);
+            }
+
+            async realFetch(appId) {
+                try {
+                    const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                    const country = STATE.currentCountry || 'ng';
+                    const lang = COUNTRY_LANGS[country] || 'en';
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 60000); 
+
+                    try {
+                        const encodedAppId = encodeURIComponent(appId);
+                        console.log(`[DEBUG] Fetching info for appId: ${appId} (Encoded: ${encodedAppId})`);
+                        const infoUrl = `${baseUrl}/api/app-info?app_id=${encodedAppId}&country=${country}&lang=${lang}`;
+                        const infoRes = await fetch(infoUrl);
+                        if (infoRes.ok) {
+                            const infoJson = await infoRes.json();
+                            STATE.appStats[appId] = {
+                                score: infoJson.data.score || "0.0",
+                                title: infoJson.data.title || appId
+                            };
+                        }
+                    } catch (e) {
+                        console.warn(`[WARN] 获取 App ${appId} 评分失败`);
+                    }
+
+                    const url = `${baseUrl}/api/reviews?app_id=${encodeURIComponent(appId)}&country=${country}&lang=${lang}&days=7&min_rating=1&max_rating=5&limit=1000`;
+                    console.log(`[DEBUG] Fetching reviews from: ${url}`);
+                    
+                    const headers = {};
+                    if (CONFIG.apiKey) headers['Authorization'] = `Bearer ${CONFIG.apiKey}`;
+
+                    const res = await fetch(url, { headers, signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    
+                    if (!res.ok) {
+                        let errorDetail = `HTTP ${res.status}`;
+                        try {
+                            const errorJson = await res.json();
+                            if (errorJson.message) errorDetail = errorJson.message;
+                        } catch (e) {}
+                        throw new Error(errorDetail);
+                    }
+
+                    const json = await res.json();
+                    
+                    if (!json.data || !Array.isArray(json.data)) {
+                        throw new Error('API 返回格式错误: 缺少 data 数组');
+                    }
+
+                    if (json.stats) {
+                        // 确保 stats 对象存在
+                        if (!STATE.appStats[appId]) STATE.appStats[appId] = {};
+                        
+                        STATE.appStats[appId].badCount = json.stats.badInDateRange;
+                        STATE.appStats[appId].totalCount = json.stats.totalInDateRange;
+                        STATE.appStats[appId].avgScoreInDateRange = json.stats.avgScoreInDateRange;
+                        
+                        console.log(`[DEBUG] Updated stats for ${appId}:`, STATE.appStats[appId]);
+                    }
+
+                    // 如果后端返回了实际的 appId (搜索回退)，记录下来
+                    if (json.debug && json.debug.realAppId && json.debug.realAppId !== appId) {
+                        console.log(`[INFO] App ID ${appId} mapped to real ID ${json.debug.realAppId}`);
+                    }
+
+                    return json.data.map(item => ({
+                        ...item,
+                        appId: item.appId || appId,
+                        time: (item.time && String(item.time).includes('T')) ? String(item.time).split('T')[0] : item.time,
+                        analysis: item.analysis || null
+                    }));
+
+                } catch (err) {
+                    console.error("Real API Error:", err);
+                    let msg = err.message;
+                    if (err.name === 'AbortError') {
+                        msg = CONFIG.i18n[CONFIG.lang].timeoutError;
+                    }
+                    const apiFailMsg = CONFIG.i18n[CONFIG.lang].toastApiFail;
+                    showToast(`${apiFailMsg}: ${msg}`, 'error');
+                    throw err;
+                }
+            }
+
+            mockFetch(appId) {
+                return new Promise(resolve => {
+                    const delay = Math.random() * 1000 + 500;
+                    STATE.appStats[appId] = {
+                    score: (3.5 + Math.random() * 1.5).toFixed(1),
+                    title: (STATE.appsByCountry[STATE.currentCountry] || []).find(a => a.id === appId)?.name || appId,
+                    badCount: Math.floor(Math.random() * 5) + 2,
+                    totalCount: Math.floor(Math.random() * 20) + 10
+                };
+
+                    setTimeout(() => {
+                        const count = Math.floor(Math.random() * 10) + 5;
+                        const mockData = [];
+                        const templates = [
+                            { user: "Adekunle", text: "This app is a scam! Interest rate is too high.", score: 1 },
+                            { user: "Chidi", text: "Very rude agents. DO NOT DOWNLOAD.", score: 1 },
+                            { user: "Olumide", text: "I did not apply for loan but they sent money forcefully.", score: 1 },
+                            { user: "Babatunde", text: "Good app, very fast disbursement.", score: 5 },
+                            { user: "Kemi", text: "Easy to use, highly recommended.", score: 4 },
+                            { user: "Ibrahim", text: "Okay, but the limit is small.", score: 3 }
+                        ];
+
+                        for (let i = 0; i < count; i++) {
+                            const tpl = templates[Math.floor(Math.random() * templates.length)];
+                            mockData.push({
+                                id: Date.now() + i,
+                                appId: appId,
+                                userName: tpl.user,
+                                text: tpl.text,
+                                score: tpl.score || (Math.floor(Math.random() * 5) + 1),
+                                time: new Date().toISOString().split('T')[0],
+                                analysis: null
+                            });
+                        }
+                        resolve(mockData);
+                    }, delay);
+                });
+            }
+        }
+
+        class AIAnalyzer {
+            async analyze(reviews) {
+                if (CONFIG.useMockData) return this.mockAnalyze(reviews);
+                return this.realAnalyze(reviews);
+            }
+
+            async realAnalyze(reviews) {
+                try {
+                    const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                    const url = `${baseUrl}/api/analyze`;
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (CONFIG.apiKey) headers['Authorization'] = `Bearer ${CONFIG.apiKey}`;
+
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ 
+                            reviews,
+                            country: STATE.currentCountry 
+                        })
+                    });
+
+                    if (!res.ok) throw new Error(`分析请求失败 (HTTP ${res.status})`);
+
+                    const json = await res.json();
+                    if (!json.results || !Array.isArray(json.results)) throw new Error('API 返回格式错误');
+
+                    return reviews.map(r => {
+                        const analysisResult = json.results.find(res => String(res.id) === String(r.id));
+                        if (analysisResult) {
+                            return {
+                                ...r,
+                                analysis: {
+                                    category: analysisResult.category,
+                                    confidence: parseFloat(analysisResult.confidence)
+                                }
+                            };
+                        }
+                        return r;
+                    });
+                } catch (err) {
+                    console.error("Real API Error:", err);
+                    const aiFailMsg = CONFIG.i18n[CONFIG.lang].toastAiFail;
+                    showToast(`${aiFailMsg}: ${err.message}`, 'error');
+                    return reviews;
+                }
+            }
+
+            mockAnalyze(reviews) {
+                return new Promise(resolve => {
+                    setTimeout(() => {
+                        const analyzed = reviews.map(r => {
+                            const text = (r.text || '').toLowerCase();
+                            let category = 'other';
+                            let confidence = 0.6 + Math.random() * 0.2;
+
+                            if (text.includes('account') || text.includes('bank')) { category = 'viol'; confidence = 0.95; }
+                            else if (text.includes('limit') || text.includes('amount')) { category = 'amt'; confidence = 0.92; }
+                            else if (text.includes('interest') || text.includes('fee')) { category = 'int'; confidence = 0.92; }
+                            else if (text.includes('force') || text.includes('automatic')) { category = 'force'; confidence = 0.98; }
+                            else if (text.includes('reject') || text.includes('fail')) { category = 'rej'; confidence = 0.95; }
+
+                            return { ...r, analysis: { category, confidence: parseFloat(confidence.toFixed(2)) } };
+                        });
+                        resolve(analyzed);
+                    }, 1500);
+                });
+            }
+        }
+
+        // ==========================================
+        // 主程序逻辑
+        // ==========================================
+
+        const appManager = new AppManager();
+        const fetcher = new ReviewFetcher();
+        const analyzer = new AIAnalyzer();
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            let icon = '';
+            if (type === 'success') icon = '<i class="fa-solid fa-circle-check text-green-400"></i>';
+            if (type === 'error') icon = '<i class="fa-solid fa-circle-exclamation text-red-400"></i>';
+            if (type === 'info') icon = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+
+            toast.innerHTML = `${icon} <span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        const app = {
+            init: () => {
+                document.getElementById('current-date').textContent = new Date().toLocaleDateString();
+                app.loadSettings();
+                // 初始化语言
+                app.setLanguage(CONFIG.lang);
+                app.updateSelectedDisplay();
+            },
+
+            setLanguage: (lang) => {
+                CONFIG.lang = lang;
+                
+                // 更新 data-i18n 元素
+                document.querySelectorAll('[data-i18n]').forEach(el => {
+                    const key = el.getAttribute('data-i18n');
+                    if (CONFIG.i18n[lang][key]) {
+                        el.textContent = CONFIG.i18n[lang][key];
+                    }
+                });
+
+                // 更新 data-i18n-placeholder 元素
+                document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                    const key = el.getAttribute('data-i18n-placeholder');
+                    if (CONFIG.i18n[lang][key]) {
+                        el.placeholder = CONFIG.i18n[lang][key];
+                    }
+                });
+
+                // 更新语言按钮状态
+                const btnZh = document.getElementById('lang-zh');
+                const btnEn = document.getElementById('lang-en');
+                
+                if (lang === 'zh') {
+                    btnZh.className = 'px-3 py-1 rounded-md text-xs transition font-bold bg-white shadow-sm text-blue-600';
+                    btnEn.className = 'px-3 py-1 rounded-md text-xs transition font-bold text-gray-500 hover:text-gray-700';
+                } else {
+                    btnEn.className = 'px-3 py-1 rounded-md text-xs transition font-bold bg-white shadow-sm text-blue-600';
+                    btnZh.className = 'px-3 py-1 rounded-md text-xs transition font-bold text-gray-500 hover:text-gray-700';
+                }
+
+                // 更新侧边栏下拉框选项
+                const countrySelector = document.getElementById('country-selector');
+                if (countrySelector) {
+                    const flags = { 'ng': '🇳🇬', 'mx': '🇲🇽', 'ph': '🇵🇭' };
+                    Array.from(countrySelector.options).forEach(opt => {
+                        const code = opt.value;
+                        const name = (COUNTRY_NAMES[lang] && COUNTRY_NAMES[lang][code]) || 
+                                     (COUNTRY_NAMES['zh'][code]) || code;
+                        const enName = COUNTRY_NAMES['en'][code] || code;
+                        opt.textContent = `${flags[code]} ${name} (${enName})`;
+                    });
+                }
+
+                // 强制刷新一些需要动态拼接的 UI
+                app.updateRatingFilterLabel();
+                app.updateAppFilterLabel();
+                app.updateDateFilterLabel();
+                app.updateSelectedDisplay();
+                app.updateSummaryTable();
+                appManager.renderList(); // 更新 App 列表标题和 Tab
+                app.updateUI();
+                app.updateRetentionStats();
+            },
+
+            handleAppSelect: (checkbox) => {
+                const appId = checkbox.value;
+                if (checkbox.checked) {
+                    if (!STATE.selectedAppIds.includes(appId)) {
+                        STATE.selectedAppIds.push(appId);
+                    }
+                } else {
+                    STATE.selectedAppIds = STATE.selectedAppIds.filter(id => id !== appId);
+                }
+                app.updateSelectedDisplay();
+            },
+
+            updateSelectedDisplay: () => {
+                const selected = STATE.selectedAppIds;
+                const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                const names = currentApps.filter(a => selected.includes(a.id)).map(a => a.name);
+                const countryName = (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][STATE.currentCountry]) || 
+                                   (COUNTRY_NAMES['zh'][STATE.currentCountry]) || 
+                                   (CONFIG.lang === 'zh' ? '未知区域' : 'Unknown');
+                
+                const unselectedText = CONFIG.i18n[CONFIG.lang].unselected;
+                document.getElementById('current-app-display').textContent = names.length ? `${countryName}: ${names.join('、')}` : `${countryName}: ${unselectedText}`;
+                
+                // 更新侧边栏国家显示
+                const sidebarCountry = document.getElementById('sidebar-country-name');
+                if (sidebarCountry) sidebarCountry.textContent = countryName;
+
+                // 同时更新汇总标题
+                const summaryTitle = document.getElementById('summary-title');
+                if (summaryTitle) {
+                    const summarySuffix = CONFIG.i18n[CONFIG.lang].summaryTitle;
+                    summaryTitle.textContent = `${countryName} ${summarySuffix}`;
+                }
+
+                // 更新评论列表中的 App 筛选下拉列表 (多选模式)
+                const filterAppList = document.getElementById('app-filter-list');
+                if (filterAppList) {
+                    filterAppList.innerHTML = currentApps.map(a => `
+                        <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                            <input type="checkbox" value="${a.id}" 
+                                   ${STATE.filterAppIds.includes(a.id) ? 'checked' : ''}
+                                   onchange="app.handleAppFilterToggle(this)"
+                                   class="rounded text-blue-600 w-3 h-3">
+                            <span class="text-xs text-gray-700 truncate">${a.name}</span>
+                        </label>
+                    `).join('');
+                    
+                    if (currentApps.length === 0) {
+                        filterAppList.innerHTML = `<div class="text-xs text-gray-400 p-2">${CONFIG.lang === 'zh' ? '暂无 App' : 'No Apps'}</div>`;
+                    }
+                    
+                    // 清理无效的选择（可能来自切换国家前）
+                    const validIds = currentApps.map(a => a.id);
+                    const newFilterIds = STATE.filterAppIds.filter(id => validIds.includes(id));
+                    if (newFilterIds.length !== STATE.filterAppIds.length) {
+                        STATE.filterAppIds = newFilterIds;
+                        app.updateAppFilterLabel();
+                    }
+                }
+
+                // 更新侧边栏国家下拉框
+                const countrySelector = document.getElementById('country-selector');
+                if (countrySelector) countrySelector.value = STATE.currentCountry;
+
+                app.updateUI();
+                app.updateRetentionStats();
+            },
+
+            changeCountry: (countryCode) => {
+                const getCountryName = (code) => (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][code]) || COUNTRY_NAMES['zh'][code] || code;
+
+                // 1. 在切换前，保存当前国家的所有活跃数据到缓存
+                if (STATE.currentCountry) {
+                    STATE.cache[STATE.currentCountry] = {
+                        reviews: [...STATE.reviews],
+                        appStats: { ...STATE.appStats },
+                        selectedAppIds: [...STATE.selectedAppIds]
+                    };
+                    console.log(`[CACHE] 已保存 ${getCountryName(STATE.currentCountry)} 的活跃数据`);
+                }
+
+                // 2. 切换当前国家代码
+                STATE.currentCountry = countryCode;
+                
+                // 3. 尝试从缓存恢复目标国家的数据
+                const cached = STATE.cache[countryCode];
+                if (cached && (cached.reviews.length > 0 || cached.selectedAppIds.length > 0)) {
+                    STATE.reviews = [...cached.reviews];
+                    STATE.appStats = { ...cached.appStats };
+                    STATE.selectedAppIds = [...cached.selectedAppIds];
+                    console.log(`[CACHE] 已从缓存恢复 ${getCountryName(countryCode)} 的历史数据 (${STATE.reviews.length} 条评论)`);
+                } else {
+                    // 如果没有缓存数据，则重置为初始状态
+                    STATE.reviews = [];
+                    STATE.appStats = {};
+                    STATE.selectedAppIds = [];
+                    console.log(`[CACHE] ${getCountryName(countryCode)} 无缓存数据，已初始化`);
+                }
+                
+                // 4. 更新侧边栏和显示信息
+                const sidebarSubtitle = document.querySelector('aside p.text-slate-400');
+                if (sidebarSubtitle) {
+                    const monitoringSuffix = CONFIG.i18n[CONFIG.lang].monitoringSuffix;
+                    sidebarSubtitle.textContent = `${getCountryName(countryCode)}${monitoringSuffix}`;
+                }
+
+                // 5. 触发 UI 更新
+                app.updateDateFilterList();
+                app.updateSelectedDisplay();
+                app.updateSummaryTable(); 
+                
+                // 6. 根据恢复的数据状态决定图表显示
+                if (STATE.reviews.length > 0) {
+                    app.updateUI(); // updateUI 会自动调用 renderChart
+                } else {
+                    app.destroyChart();
+                }
+            },
+
+            loadSettings: () => {
+                const stored = localStorage.getItem('gp_settings');
+                if (stored) {
+                    const s = JSON.parse(stored);
+                    CONFIG.apiBaseUrl = s.apiBaseUrl || CONFIG.apiBaseUrl;
+                    CONFIG.apiKey = s.apiKey || '';
+                }
+                document.getElementById('setting-api-url').value = CONFIG.apiBaseUrl;
+                document.getElementById('setting-api-key').value = CONFIG.apiKey;
+            },
+
+            saveSettings: (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                let url = formData.get('apiBaseUrl').trim();
+                if (!url) url = window.location.origin;
+                CONFIG.apiBaseUrl = url;
+                CONFIG.apiKey = formData.get('apiKey');
+                
+                localStorage.setItem('gp_settings', JSON.stringify({
+                    apiBaseUrl: CONFIG.apiBaseUrl,
+                    apiKey: CONFIG.apiKey
+                }));
+
+                app.toggleSettings(false);
+                showToast(CONFIG.i18n[CONFIG.lang].toastSaveSuccess, 'success');
+            },
+
+            testConnection: async () => {
+                const urlInput = document.getElementById('setting-api-url');
+                const apiKeyInput = document.getElementById('setting-api-key');
+                const statusEl = document.getElementById('connection-status');
+                
+                let baseUrl = urlInput.value.replace(/\/$/, '');
+                if (!baseUrl) {
+                    baseUrl = window.location.origin;
+                    // 如果是本地文件打开 (file://)，默认指向 localhost:3000
+                    if (baseUrl === 'null' || baseUrl.startsWith('file://')) {
+                        baseUrl = 'http://localhost:3000';
+                        urlInput.value = baseUrl; // 自动填充
+                    }
+                }
+
+                statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${CONFIG.i18n[CONFIG.lang].connecting}`;
+                statusEl.classList.remove('hidden');
+                statusEl.className = 'text-xs mt-2 text-blue-500 block';
+
+                try {
+                    const testUrl = `${baseUrl}/api/reviews?app_id=test_connection_check&limit=1`;
+                    const headers = {};
+                    if (apiKeyInput.value) headers['Authorization'] = `Bearer ${apiKeyInput.value}`;
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+                    const res = await fetch(testUrl, { headers, signal: controller.signal });
+                    clearTimeout(timeoutId);
+
+                    if (res.ok) {
+                        statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${CONFIG.i18n[CONFIG.lang].success}`;
+                        statusEl.className = 'text-xs mt-2 text-green-600 block';
+                    } else {
+                        statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${CONFIG.i18n[CONFIG.lang].success} (HTTP ${res.status})`;
+                        statusEl.className = 'text-xs mt-2 text-yellow-600 block';
+                    }
+                } catch (err) {
+                    statusEl.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${CONFIG.i18n[CONFIG.lang].fail}: ${err.message}`;
+                    statusEl.className = 'text-xs mt-2 text-red-600 block';
+                }
+            },
+
+            toggleSettings: (show) => {
+                const modal = document.getElementById('settings-modal');
+                if (show) modal.classList.remove('hidden');
+                else modal.classList.add('hidden');
+            },
+
+            updateSummaryTable: () => {
+                const summarySection = document.getElementById('summary-section');
+                const tbody = document.getElementById('summary-table-body');
+                const tfoot = document.getElementById('summary-table-footer');
+                
+                if (STATE.reviews.length === 0) {
+                    summarySection.classList.add('hidden');
+                    return;
+                }
+                
+                summarySection.classList.remove('hidden');
+                
+                const countryName = (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][STATE.currentCountry]) || 
+                                   (COUNTRY_NAMES['zh'][STATE.currentCountry]) || 
+                                   (CONFIG.lang === 'zh' ? '未知区域' : 'Unknown');
+                const langCode = COUNTRY_LANGS[STATE.currentCountry] || 'en';
+                const titleEl = document.getElementById('summary-title');
+                if (titleEl) {
+                    const summarySuffix = CONFIG.i18n[CONFIG.lang].summaryTitle;
+                    titleEl.textContent = `${countryName} (${langCode}) ${summarySuffix}`;
+                }
+                
+                const grouped = {};
+                STATE.selectedAppIds.forEach(appId => {
+                    const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                    const appInfo = currentApps.find(a => a.id === appId);
+                    const appReviews = STATE.reviews.filter(r => r.appId === appId);
+                    // 仅统计差评 (1-2星) 的分类情况
+                    const analyzedReviews = appReviews.filter(r => r.analysis && r.score <= 2);
+                    
+                    const badCount = STATE.appStats[appId]?.badCount || 0;
+                    const totalCount = STATE.appStats[appId]?.totalCount || 0;
+                    const badRate = totalCount > 0 ? ((badCount / totalCount) * 100).toFixed(2) : "0.00";
+                    
+                    const catStats = {};
+                    CONFIG.categories.forEach(c => catStats[c.id] = 0);
+                    analyzedReviews.forEach(r => {
+                        if (r.analysis && r.analysis.category) catStats[r.analysis.category]++;
+                    });
+
+                    grouped[appId] = {
+                        name: appInfo ? appInfo.name : appId,
+                        score: STATE.appStats[appId]?.score || "0.0",
+                        badCount,
+                        totalCount,
+                        badRate,
+                        catStats
+                    };
+                });
+
+                tbody.innerHTML = Object.values(grouped).map(data => {
+                    let rateBg = 'bg-white';
+                    const rateNum = parseFloat(data.badRate);
+                    if (rateNum >= 50) rateBg = 'bg-red-500 text-white';
+                    else if (rateNum >= 30) rateBg = 'bg-orange-400 text-white';
+                    else if (rateNum > 0) rateBg = 'bg-green-500 text-white';
+
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="p-2 border border-gray-200 text-left font-medium">${data.name}</td>
+                            <td class="p-2 border border-gray-200 bg-blue-50">${data.score}</td>
+                            <td class="p-2 border border-gray-200">${data.badCount}</td>
+                            <td class="p-2 border border-gray-200">${data.totalCount}</td>
+                            <td class="p-2 border border-gray-200 ${rateBg}">${data.badRate}%</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['viol']}</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['amt']}</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['int']}</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['force']}</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['rej']}</td>
+                            <td class="p-2 border border-gray-200">${data.catStats['other']}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const totals = { badCount: 0, totalCount: 0, cats: {} };
+                CONFIG.categories.forEach(c => totals.cats[c.id] = 0);
+                Object.values(grouped).forEach(d => {
+                    totals.badCount += d.badCount;
+                    totals.totalCount += d.totalCount;
+                    CONFIG.categories.forEach(c => totals.cats[c.id] += d.catStats[c.id]);
+                });
+
+                const totalRate = totals.totalCount > 0 ? ((totals.badCount / totals.totalCount) * 100).toFixed(2) : "0.00";
+                const dateRange = app.getDateRangeDisplay();
+                const totalLabel = CONFIG.i18n[CONFIG.lang].tableTotal;
+                tfoot.innerHTML = `
+                    <tr class="bg-yellow-100 font-bold">
+                        <td class="p-2 border border-gray-200 text-left">${totalLabel} (${dateRange})</td>
+                        <td class="p-2 border border-gray-200"></td>
+                        <td class="p-2 border border-gray-200">${totals.badCount}</td>
+                        <td class="p-2 border border-gray-200">${totals.totalCount}</td>
+                        <td class="p-2 border border-gray-200">${totalRate}%</td>
+                        ${CONFIG.categories.map(c => `<td class="p-2 border border-gray-200">${totals.cats[c.id]}</td>`).join('')}
+                    </tr>
+                `;
+                STATE.summaryData = Object.values(grouped);
+            },
+
+            getDateRangeDisplay: () => {
+                const end = new Date(); end.setDate(end.getDate() - 2);
+                const start = new Date(); start.setDate(start.getDate() - 8);
+                const fmt = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+                return `${fmt(start)}-${fmt(end)}`;
+            },
+
+            exportSummaryCSV: () => {
+                if (STATE.summaryData.length === 0) return;
+                const countryName = (COUNTRY_NAMES[CONFIG.lang] && COUNTRY_NAMES[CONFIG.lang][STATE.currentCountry]) || 
+                                   (COUNTRY_NAMES['zh'][STATE.currentCountry]) || 
+                                   (CONFIG.lang === 'zh' ? '未知区域' : 'Unknown');
+                const headers = [
+                    CONFIG.i18n[CONFIG.lang].tableApp,
+                    CONFIG.i18n[CONFIG.lang].tableScore,
+                    CONFIG.i18n[CONFIG.lang].tableBadCount,
+                    CONFIG.i18n[CONFIG.lang].tableTotal,
+                    CONFIG.i18n[CONFIG.lang].tableBadRate,
+                    ...CONFIG.categories.map(c => CONFIG.i18n[CONFIG.lang][c.i18nKey])
+                ];
+                const rows = STATE.summaryData.map(d => [
+                    d.name, d.score, d.badCount, d.totalCount, d.badRate + "%",
+                    ...CONFIG.categories.map(c => d.catStats[c.id])
+                ]);
+                let csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.setAttribute("href", URL.createObjectURL(blob));
+                link.setAttribute("download", `${countryName}_summary_${new Date().toISOString().split('T')[0]}.csv`);
+                link.click();
+            },
+
+            copySummaryTable: () => {
+                const table = document.querySelector('#summary-section table');
+                if (!table) return;
+
+                const range = document.createRange();
+                range.selectNode(table);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+
+                try {
+                    document.execCommand('copy');
+                    showToast(CONFIG.i18n[CONFIG.lang].toastCopySuccess, 'success');
+                } catch (err) {
+                    showToast(CONFIG.i18n[CONFIG.lang].toastCopyFail, 'error');
+                }
+                window.getSelection().removeAllRanges();
+            },
+
+            switchView: (viewName) => {
+                ['dashboard', 'apps'].forEach(v => {
+                    document.getElementById(`view-${v}`).classList.add('hidden');
+                    document.getElementById(`nav-${v}`).classList.remove('bg-slate-700');
+                });
+                document.getElementById(`view-${viewName}`).classList.remove('hidden');
+                document.getElementById(`nav-${viewName}`).classList.add('bg-slate-700');
+                document.getElementById('page-title').textContent = CONFIG.i18n[CONFIG.lang][viewName];
+            },
+
+            toggleApiMode: () => {
+                CONFIG.useMockData = !CONFIG.useMockData;
+                const ind = document.getElementById('api-mode-indicator');
+                const text = document.getElementById('api-mode-text');
+                
+                if (CONFIG.useMockData) {
+                    ind.textContent = 'MOCK';
+                    ind.className = 'font-bold text-yellow-400';
+                    text.textContent = CONFIG.i18n[CONFIG.lang].mockMode;
+                    text.parentElement.classList.replace('bg-gray-100', 'bg-yellow-50');
+                    text.parentElement.classList.add('text-yellow-700', 'border-yellow-200');
+                } else {
+                    ind.textContent = 'REAL';
+                    ind.className = 'font-bold text-green-400';
+                    text.textContent = CONFIG.i18n[CONFIG.lang].realMode;
+                    text.parentElement.classList.replace('bg-yellow-50', 'bg-gray-100');
+                    text.parentElement.classList.remove('text-yellow-700', 'border-yellow-200');
+                }
+            },
+
+            addApp: (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                appManager.add(formData.get('appName'), formData.get('appId'));
+                e.target.reset();
+                showToast(CONFIG.i18n[CONFIG.lang].toastAddSuccess, 'success');
+            },
+
+            fetchReviews: async () => {
+                if (!STATE.selectedAppIds.length) return showToast(CONFIG.i18n[CONFIG.lang].toastSelectApp, 'info');
+                const loadingMsg = CONFIG.i18n[CONFIG.lang].toastFetching;
+                app.setLoading(true, loadingMsg);
+                try {
+                    const results = [];
+                    const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                    for (const id of STATE.selectedAppIds) {
+                        const appName = currentApps.find(a => a.id === id)?.name || id;
+                        const individualLoadingMsg = CONFIG.i18n[CONFIG.lang].toastFetchingApp.replace('{appName}', appName);
+                        app.setLoading(true, individualLoadingMsg);
+                        results.push(...(await fetcher.fetch(id)));
+                    }
+                    STATE.reviews = results;
+                    document.getElementById('btn-analyze').disabled = false;
+                    app.updateDateFilterList();
+                    app.updateRetentionStats(); // 新增调用
+                    app.updateUI();
+                    app.updateSummaryTable();
+                } catch (err) { console.error(err); }
+                finally { app.setLoading(false); }
+            },
+
+            analyzeReviews: async () => {
+                if (STATE.reviews.length === 0) return;
+                const loadingMsg = CONFIG.i18n[CONFIG.lang].toastAnalyzing;
+                app.setLoading(true, loadingMsg);
+                try {
+                    STATE.reviews = await analyzer.analyze(STATE.reviews);
+                    app.updateDateFilterList();
+                    app.updateUI();
+                    app.updateSummaryTable();
+                } catch (err) { console.error(err); }
+                finally { app.setLoading(false); }
+            },
+
+            updateRetentionStats: async () => {
+                const container = document.getElementById('retention-list-container');
+                if (!container) return;
+
+                if (STATE.selectedAppIds.length === 0) {
+                    container.innerHTML = '<div class="text-xl font-bold text-gray-300 italic">--</div>';
+                    return;
+                }
+
+                const baseUrl = CONFIG.apiBaseUrl.replace(/\/$/, '');
+                const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                
+                // 清空并显示加载状态
+                container.innerHTML = '<div class="text-xs text-gray-400 italic">Loading...</div>';
+
+                try {
+                    const statsPromises = STATE.selectedAppIds.map(async (appId) => {
+                        try {
+                            const res = await fetch(`${baseUrl}/api/retention-stats?app_id=${encodeURIComponent(appId)}`);
+                            if (res.ok) {
+                                const { data } = await res.json();
+                                const appName = currentApps.find(a => a.id === appId)?.name || appId;
+                                return { appId, appName, ...data };
+                            }
+                        } catch (e) {
+                            console.error(`Failed for ${appId}:`, e);
+                        }
+                        return null;
+                    });
+
+                    const results = (await Promise.all(statsPromises)).filter(Boolean);
+                    
+                    if (results.length === 0) {
+                        container.innerHTML = '<div class="text-xl font-bold text-gray-300 italic">--</div>';
+                        return;
+                    }
+
+                    container.innerHTML = results.map(res => {
+                        const colorClass = res.baseDate ? 
+                            (res.retentionRate > 80 ? 'text-green-600' : (res.retentionRate > 50 ? 'text-blue-600' : 'text-orange-600')) : 
+                            'text-gray-400';
+                        
+                        const rateText = res.baseDate ? `${res.retentionRate}%` : '--';
+                        const descText = res.baseDate ? 
+                            CONFIG.i18n[CONFIG.lang].statRetentionDesc.replace('{date}', res.baseDate) : 
+                            (res.message || CONFIG.i18n[CONFIG.lang].statCollecting);
+
+                        return `
+                            <div class="border-b border-gray-50 last:border-0 pb-3 mb-1">
+                                <div class="flex justify-between items-start">
+                                    <div class="text-xs text-gray-500 font-semibold truncate max-w-[130px]" title="${res.appName}">${res.appName}</div>
+                                    <div class="text-xl font-bold leading-none ${colorClass}">${rateText}</div>
+                                </div>
+                                <div class="text-[11px] text-gray-400 mt-1.5 leading-relaxed">${descText}</div>
+                            </div>
+                        `;
+                    }).join('');
+
+                } catch (e) {
+                    console.error('Failed to update retention stats:', e);
+                    container.innerHTML = '<div class="text-xl font-bold text-gray-300 italic">Error</div>';
+                }
+            },
+
+            updateUI: () => {
+                // 更新 App 管理与选择列表
+                if (typeof appManager !== 'undefined') {
+                    appManager.renderList();
+                    appManager.updateSelector();
+                }
+
+                // 更新仪表板核心指标
+                document.getElementById('stat-total').textContent = STATE.reviews.length;
+                
+                const statusWaiting = CONFIG.i18n[CONFIG.lang].statusWaiting;
+                const statusMsg = document.getElementById('status-msg');
+                if (statusMsg) {
+                    statusMsg.textContent = statusWaiting;
+                }
+                
+                // 更新平均评分：计算所有选中 App 在指定范围内的加权平均分
+                let totalScoreSum = 0;
+                let totalReviewCount = 0;
+                
+                STATE.selectedAppIds.forEach(appId => {
+                    const stat = STATE.appStats[appId];
+                    if (stat) {
+                        // 优先使用后端返回的范围内平均分，如果没有则尝试使用 mock 的 score
+                        const avg = typeof stat.avgScoreInDateRange === 'number' ? stat.avgScoreInDateRange : 
+                                    (typeof stat.score === 'string' ? parseFloat(stat.score) : 
+                                     (typeof stat.score === 'number' ? stat.score : 0));
+                        
+                        const count = typeof stat.totalCount === 'number' ? stat.totalCount : 0;
+                        
+                        if (count > 0) {
+                            totalScoreSum += avg * count;
+                            totalReviewCount += count;
+                        }
+                    }
+                });
+
+                const finalAvg = totalReviewCount > 0 ? (totalScoreSum / totalReviewCount).toFixed(1) : '-';
+                document.getElementById('stat-avg-score').textContent = finalAvg;
+
+                // 更新置信度与图表 (仅针对差评 1-2 星进行主要问题统计)
+                const badReviews = STATE.reviews.filter(r => r.score <= 2);
+                const hasAnalysis = badReviews.some(r => r.analysis);
+
+                if (hasAnalysis) {
+                    const counts = {}; 
+                    let totalConf = 0, analyzedCount = 0;
+                    
+                    badReviews.forEach(r => {
+                        if (r.analysis) {
+                            counts[r.analysis.category] = (counts[r.analysis.category] || 0) + 1;
+                            totalConf += r.analysis.confidence; 
+                            analyzedCount++;
+                        }
+                    });
+
+                    // 计算出现频率最高的分类 (主要问题)
+                    const categoriesWithCounts = Object.keys(counts);
+                    if (categoriesWithCounts.length > 0) {
+                        const maxCat = categoriesWithCounts.reduce((a, b) => counts[a] > counts[b] ? a : b);
+                        const maxCatInfo = CONFIG.categories.find(c => c.id === maxCat);
+                        const unknownText = CONFIG.i18n[CONFIG.lang].unknown;
+                        document.getElementById('stat-top-issue').textContent = maxCatInfo ? CONFIG.i18n[CONFIG.lang][maxCatInfo.i18nKey] : unknownText;
+                    } else {
+                        document.getElementById('stat-top-issue').textContent = '-';
+                    }
+
+                    document.getElementById('stat-confidence').textContent = analyzedCount > 0 ? (totalConf / analyzedCount * 100).toFixed(1) + '%' : '-';
+                    app.renderChart(CONFIG.categories.map(c => counts[c.id] || 0));
+                } else {
+                    document.getElementById('stat-top-issue').textContent = '-';
+                    document.getElementById('stat-confidence').textContent = '-';
+                    app.destroyChart();
+                }
+
+                // 同步评分多选框状态
+                document.querySelectorAll('#rating-dropdown input[type="checkbox"]').forEach(cb => {
+                    cb.checked = STATE.filterRatings.includes(parseInt(cb.value));
+                });
+
+                // 同步 App 多选框状态
+                document.querySelectorAll('#app-filter-list input[type="checkbox"]').forEach(cb => {
+                    cb.checked = STATE.filterAppIds.includes(cb.value);
+                });
+
+                // 同步时间多选框状态
+                document.querySelectorAll('#date-filter-list input[type="checkbox"]').forEach(cb => {
+                    cb.checked = STATE.filterDates.includes(cb.value);
+                });
+
+                // 渲染评论列表
+                const tbody = document.getElementById('reviews-table-body');
+                const paginationControls = document.getElementById('pagination-controls');
+
+                if (STATE.reviews.length === 0) {
+                    const noDataText = CONFIG.i18n[CONFIG.lang].noData;
+                    tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-400">${noDataText}</td></tr>`;
+                    if (paginationControls) paginationControls.classList.add('hidden');
+                } else {
+                    if (paginationControls) paginationControls.classList.remove('hidden');
+                    const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                    const userText = CONFIG.i18n[CONFIG.lang].user;
+                    const pendingText = CONFIG.i18n[CONFIG.lang].statusPending;
+
+                    // 1. 过滤
+                    let filtered = STATE.reviews;
+                    if (STATE.filterRatings && STATE.filterRatings.length > 0) {
+                        filtered = filtered.filter(r => STATE.filterRatings.includes(r.score));
+                    }
+                    if (STATE.filterAppIds && STATE.filterAppIds.length > 0) {
+                        filtered = filtered.filter(r => STATE.filterAppIds.includes(r.appId));
+                    }
+                    if (STATE.filterDates && STATE.filterDates.length > 0) {
+                        filtered = filtered.filter(r => STATE.filterDates.includes(r.time));
+                    }
+
+                    // 2. 分页
+                    const totalItems = filtered.length;
+                    const totalPages = Math.ceil(totalItems / STATE.pageSize) || 1;
+                    if (STATE.currentPage > totalPages) STATE.currentPage = totalPages;
+                    if (STATE.currentPage < 1) STATE.currentPage = 1;
+
+                    const start = (STATE.currentPage - 1) * STATE.pageSize;
+                    const end = start + STATE.pageSize;
+                    const pageData = filtered.slice(start, end);
+
+                    // 3. 更新分页控制 UI
+                    const paginationInfo = document.getElementById('pagination-info');
+                    if (paginationInfo) {
+                        const pageInfoTemplate = CONFIG.i18n[CONFIG.lang].pageInfo;
+                        paginationInfo.textContent = pageInfoTemplate.replace('{current}', STATE.currentPage).replace('{total}', totalPages);
+                    }
+                    const btnPrev = document.getElementById('btn-prev-page');
+                    const btnNext = document.getElementById('btn-next-page');
+                    if (btnPrev) btnPrev.disabled = STATE.currentPage === 1;
+                    if (btnNext) btnNext.disabled = STATE.currentPage === totalPages;
+
+                    // 4. 渲染
+                    if (pageData.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-400">No results found</td></tr>`;
+                    } else {
+                        tbody.innerHTML = pageData.map(r => {
+                            const appName = currentApps.find(a => a.id === r.appId)?.name || r.appId;
+                            const cat = r.analysis ? CONFIG.categories.find(c => c.id === r.analysis.category) : null;
+                            const catName = cat ? CONFIG.i18n[CONFIG.lang][cat.i18nKey] : pendingText;
+                            return `
+                                <tr class="hover:bg-gray-50 border-b border-gray-100">
+                                    <td class="p-3"><div class="flex text-yellow-400 text-xs">${Array(5).fill(0).map((_,i) => `<i class="fa-solid fa-star ${i < r.score ? '' : 'text-gray-200'}"></i>`).join('')}</div></td>
+                                    <td class="p-3 text-xs text-gray-600">${appName}</td>
+                                    <td class="p-3 text-xs text-gray-600">${r.userName || userText}</td>
+                                    <td class="p-3 text-gray-700 truncate max-w-xs" title="${r.text}">${r.text}</td>
+                                    <td class="p-3">${cat ? `<span class="px-2 py-1 rounded text-xs text-white" style="background-color: ${cat.color}">${catName}</span>` : `<span class="text-gray-400 italic">${catName}</span>`}</td>
+                                    <td class="p-3 text-xs text-gray-500">${r.analysis ? (r.analysis.confidence * 100).toFixed(0) + '%' : '-'}</td>
+                                    <td class="p-3 text-xs text-gray-400">${r.time}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+                }
+            },
+
+            toggleRatingDropdown: (e) => {
+                e.stopPropagation();
+                const dropdown = document.getElementById('rating-dropdown');
+                dropdown.classList.toggle('hidden');
+                
+                // 点击外部关闭
+                if (!dropdown.classList.contains('hidden')) {
+                    const closeDropdown = (event) => {
+                        if (!dropdown.contains(event.target)) {
+                            dropdown.classList.add('hidden');
+                            document.removeEventListener('click', closeDropdown);
+                        }
+                    };
+                    document.addEventListener('click', closeDropdown);
+                }
+            },
+
+            handleRatingToggle: (checkbox) => {
+                const rating = parseInt(checkbox.value);
+                if (checkbox.checked) {
+                    if (!STATE.filterRatings.includes(rating)) {
+                        STATE.filterRatings.push(rating);
+                    }
+                } else {
+                    STATE.filterRatings = STATE.filterRatings.filter(r => r !== rating);
+                }
+                
+                app.updateRatingFilterLabel();
+                STATE.currentPage = 1;
+                app.updateUI();
+            },
+
+            updateRatingFilterLabel: () => {
+                 const label = document.getElementById('rating-filter-label');
+                 if (!label) return;
+                 
+                 if (STATE.filterRatings.length === 0) {
+                     label.textContent = CONFIG.i18n[CONFIG.lang].filterRating;
+                     label.setAttribute('data-i18n', 'filterRating');
+                 } else {
+                     label.textContent = STATE.filterRatings.sort((a,b) => b-a).join(',') + ' ⭐';
+                     label.removeAttribute('data-i18n'); // 防止 setLanguage 覆盖
+                 }
+             },
+
+             toggleAppFilterDropdown: (e) => {
+                e.stopPropagation();
+                const dropdown = document.getElementById('app-filter-dropdown');
+                dropdown.classList.toggle('hidden');
+                
+                if (!dropdown.classList.contains('hidden')) {
+                    const closeDropdown = (event) => {
+                        if (!dropdown.contains(event.target)) {
+                            dropdown.classList.add('hidden');
+                            document.removeEventListener('click', closeDropdown);
+                        }
+                    };
+                    document.addEventListener('click', closeDropdown);
+                }
+             },
+
+             handleAppFilterToggle: (checkbox) => {
+                const appId = checkbox.value;
+                if (checkbox.checked) {
+                    if (!STATE.filterAppIds.includes(appId)) {
+                        STATE.filterAppIds.push(appId);
+                    }
+                } else {
+                    STATE.filterAppIds = STATE.filterAppIds.filter(id => id !== appId);
+                }
+                
+                app.updateAppFilterLabel();
+                STATE.currentPage = 1;
+                app.updateUI();
+             },
+
+             updateAppFilterLabel: () => {
+                const label = document.getElementById('app-filter-label');
+                if (!label) return;
+                
+                const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                if (STATE.filterAppIds.length === 0) {
+                    label.textContent = CONFIG.i18n[CONFIG.lang].filterApp;
+                    label.setAttribute('data-i18n', 'filterApp');
+                } else {
+                    const selectedNames = currentApps.filter(a => STATE.filterAppIds.includes(a.id)).map(a => a.name);
+                    label.textContent = selectedNames.join(', ');
+                    label.removeAttribute('data-i18n');
+                }
+             },
+
+             toggleDateFilterDropdown: (e) => {
+                e.stopPropagation();
+                const dropdown = document.getElementById('date-filter-dropdown');
+                dropdown.classList.toggle('hidden');
+                
+                if (!dropdown.classList.contains('hidden')) {
+                    const closeDropdown = (event) => {
+                        if (!dropdown.contains(event.target)) {
+                            dropdown.classList.add('hidden');
+                            document.removeEventListener('click', closeDropdown);
+                        }
+                    };
+                    document.addEventListener('click', closeDropdown);
+                }
+             },
+
+             handleDateFilterToggle: (checkbox) => {
+                const date = checkbox.value;
+                if (checkbox.checked) {
+                    if (!STATE.filterDates.includes(date)) {
+                        STATE.filterDates.push(date);
+                    }
+                } else {
+                    STATE.filterDates = STATE.filterDates.filter(d => d !== date);
+                }
+                
+                app.updateDateFilterLabel();
+                STATE.currentPage = 1;
+                app.updateUI();
+             },
+
+             updateDateFilterLabel: () => {
+                const label = document.getElementById('date-filter-label');
+                if (!label) return;
+                
+                if (STATE.filterDates.length === 0) {
+                    label.textContent = CONFIG.i18n[CONFIG.lang].filterDate;
+                    label.setAttribute('data-i18n', 'filterDate');
+                } else {
+                    label.textContent = STATE.filterDates.sort((a,b) => b > a ? -1 : 1).join(', ');
+                    label.removeAttribute('data-i18n');
+                }
+             },
+
+             updateDateFilterList: () => {
+                const filterDateList = document.getElementById('date-filter-list');
+                if (!filterDateList) return;
+
+                // 提取所有不重复的日期
+                const dates = [...new Set(STATE.reviews.map(r => r.time))].filter(Boolean).sort((a,b) => b > a ? 1 : -1);
+                
+                if (dates.length === 0) {
+                    filterDateList.innerHTML = `<div class="text-xs text-gray-400 p-2">${CONFIG.lang === 'zh' ? '暂无日期' : 'No Dates'}</div>`;
+                    return;
+                }
+
+                filterDateList.innerHTML = dates.map(date => `
+                    <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer transition">
+                        <input type="checkbox" value="${date}" 
+                               ${STATE.filterDates.includes(date) ? 'checked' : ''}
+                               onchange="app.handleDateFilterToggle(this)"
+                               class="rounded text-blue-600 w-3 h-3">
+                        <span class="text-xs text-gray-700 truncate">${date}</span>
+                    </label>
+                `).join('');
+
+                // 清理无效的选择（可能来自之前的评论数据）
+                const newFilterDates = STATE.filterDates.filter(d => dates.includes(d));
+                if (newFilterDates.length !== STATE.filterDates.length) {
+                    STATE.filterDates = newFilterDates;
+                    app.updateDateFilterLabel();
+                }
+             },
+
+             handleFilter: (type, value) => {
+                  STATE.currentPage = 1; // 筛选时回到第一页
+                  app.updateUI();
+              },
+
+            changePage: (delta) => {
+                STATE.currentPage += delta;
+                app.updateUI();
+                // 滚动回表格顶部
+                const tableBody = document.getElementById('reviews-table-body');
+                if (tableBody) tableBody.parentElement.parentElement.scrollTop = 0;
+            },
+
+            renderChart: (data) => {
+                const ctx = document.getElementById('chart-categories').getContext('2d');
+                if (STATE.chartInstance) STATE.chartInstance.destroy();
+                STATE.chartInstance = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: CONFIG.categories.map(c => CONFIG.i18n[CONFIG.lang][c.i18nKey]),
+                        datasets: [{ data, backgroundColor: CONFIG.categories.map(c => c.color), borderWidth: 0 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+                });
+            },
+
+            destroyChart: () => { if (STATE.chartInstance) { STATE.chartInstance.destroy(); STATE.chartInstance = null; } },
+
+            setLoading: (isLoading, msg = 'Loading...') => {
+                const statusEl = document.getElementById('status-msg');
+                const readyMsg = CONFIG.lang === 'zh' ? '就绪' : 'Ready';
+                statusEl.innerHTML = isLoading ? `<div class="flex items-center gap-2"><div class="loading-spinner w-4 h-4 border-2"></div> ${msg}</div>` : readyMsg;
+            },
+
+            exportData: () => {
+                if (!STATE.reviews.length) return showToast(CONFIG.lang === 'zh' ? '没有数据可导出' : 'No data to export', 'info');
+                const currentApps = STATE.appsByCountry[STATE.currentCountry] || [];
+                const rows = STATE.reviews.map(r => {
+                    const appName = currentApps.find(a => a.id === r.appId)?.name || r.appId;
+                    const cat = r.analysis ? CONFIG.categories.find(c => c.id === r.analysis.category) : null;
+                    const catName = cat ? CONFIG.i18n[CONFIG.lang][cat.i18nKey] : '';
+                    return [
+                        r.id || '',
+                        r.appId,
+                        appName,
+                        r.score,
+                        `"${r.text.replace(/"/g, '""')}"`,
+                        catName,
+                        r.analysis ? (r.analysis.confidence * 100).toFixed(0) + '%' : '',
+                        r.time
+                    ];
+                });
+                const headers = [
+                    "ID", 
+                    CONFIG.i18n[CONFIG.lang].tableApp, 
+                    "AppName", 
+                    CONFIG.i18n[CONFIG.lang].tableScore, 
+                    CONFIG.i18n[CONFIG.lang].tableReview, 
+                    CONFIG.i18n[CONFIG.lang].tableCategory, 
+                    CONFIG.i18n[CONFIG.lang].tableConfidence, 
+                    CONFIG.i18n[CONFIG.lang].tableTime
+                ];
+                const csv = "\uFEFF" + headers.join(",") + "\n" + rows.map(r => r.join(",")).join("\n");
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.setAttribute("href", URL.createObjectURL(blob));
+                link.setAttribute("download", `reviews_${new Date().toISOString().split('T')[0]}.csv`);
+                link.click();
+            }
+        };
+
+        app.init();
+    </script>
+</body>
+</html>

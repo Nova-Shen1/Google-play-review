@@ -1,0 +1,44 @@
+{
+  "ng": [
+    {
+      "name": "CashRun",
+      "id": "cash.run.credit.easy.loan"
+    },
+    {
+      "name": "KK Cash",
+      "id": "kkcash.loan.credit.fast"
+    },
+    {
+      "name": "Apex Loan",
+      "id": "com.apexloan.naira.app"
+    },
+    {
+      "name": "Lend Max",
+      "id": "lendmax.money.credit.loan"
+    },
+    {
+      "name": "KashFlex",
+      "id": "com.loan.kash.flex.client"
+    },
+    {
+      "name": "QuickEgo",
+      "id": "com.ng.quick.ego.loan"
+    },
+    {
+      "name": "OkadaNaira",
+      "id": "okada.naira.lending.quickly"
+    }
+  ],
+  "mx": [
+    {
+      "name": "RápidoCrédito",
+      "id": "com.rapido.credito.cash.rttsa"
+    }
+  ],
+  "ph": [
+    {
+      "name": "PesoHaus",
+      "id": "com.pesohaus.loan.app"
+    }
+  ]
+}
