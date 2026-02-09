@@ -12,8 +12,7 @@ const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const gplayRaw = require('google-play-scraper');
-const gplay = gplayRaw.default || gplayRaw;
+let gplay;
 
 // 重试包装函数
 const withRetry = async (fn, retries = 3, delay = 2000) => {
@@ -714,9 +713,42 @@ function getLocalIP() {
     return '127.0.0.1';
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-    const localIP = getLocalIP();
-    console.log(`[SUCCESS] 服务已启动，可供跨机器访问`);
-    console.log(`- 本地访问: http://localhost:${PORT}`);
-    console.log(`- 局域网访问: http://${localIP}:${PORT}`);
-});
+const os = require('os');
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1';
+}
+
+// 核心修改：使用 async 函数包装启动逻辑
+async function startServer() {
+    try {
+        console.log('[INFO] 正在初始化 ESM 模块...');
+        
+        // 动态加载 google-play-scraper
+        const gplayModule = await import('google-play-scraper');
+        // 根据模块导出情况，通常使用 .default
+        gplay = gplayModule.default || gplayModule;
+
+        console.log('[SUCCESS] google-play-scraper 加载成功');
+
+        app.listen(PORT, '0.0.0.0', () => {
+            const localIP = getLocalIP();
+            console.log(`[SUCCESS] 服务已启动`);
+            console.log(`- 本地访问: http://localhost:${PORT}`);
+            console.log(`- 局域网访问: http://${localIP}:${PORT}`);
+        });
+    } catch (err) {
+        console.error('[FATAL] 服务启动失败:', err);
+        // 在 Vercel 环境下，如果启动失败，日志会打印在这里
+    }
+}
+
+// 执行启动
+startServer();
