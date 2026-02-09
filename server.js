@@ -699,30 +699,15 @@ app.get('/api/retention-stats', (req, res) => {
     });
 });
 
-// Start Server
-const os = require('os');
-function getLocalIP() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
-            }
-        }
-    }
-    return '127.0.0.1';
-}
-
-if (typeof os === 'undefined') {
-    var os = require('os'); 
-}
+onst os = require('os'); // 确保这里只有一次声明
 
 function getLocalIP() {
     try {
         const interfaces = os.networkInterfaces();
         for (const name of Object.keys(interfaces)) {
             for (const iface of interfaces[name]) {
-                if (iface.family === 'IPv4' && !iface.internal) {
+                // Node.js 18+ family 属性可能是数字 4
+                if ((iface.family === 'IPv4' || iface.family === 4) && !iface.internal) {
                     return iface.address;
                 }
             }
@@ -733,7 +718,7 @@ function getLocalIP() {
     return '127.0.0.1';
 }
 
-// 使用 async 函数确保模块加载完成后再启动监听
+// 使用 async 函数确保 ESM 模块加载完成后再启动监听
 async function startServer() {
     try {
         console.log('[INFO] 正在加载 google-play-scraper (ESM)...');
@@ -744,7 +729,7 @@ async function startServer() {
 
         console.log('[SUCCESS] google-play-scraper 模块就绪');
 
-        // Vercel 实际上会自动处理端口，但我们需要 app.listen 来保持进程
+        // 在 Vercel 环境下 PORT 由系统分配
         app.listen(PORT, '0.0.0.0', () => {
             const localIP = getLocalIP();
             console.log(`[SUCCESS] 服务已启动: http://${localIP}:${PORT}`);
@@ -754,5 +739,5 @@ async function startServer() {
     }
 }
 
-// 执行启动函数
+// 执行启动
 startServer();
