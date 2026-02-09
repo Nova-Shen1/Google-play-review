@@ -1,3 +1,12 @@
+// 在 require 任何模块之前，强制清空可能存在的代理环境变量
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+
+require('dotenv').config();
+// ... 后面再接你的 express 等代码
+
 const gplayRaw = require('google-play-scraper');
 const gplay = gplayRaw.default || gplayRaw;
 require('dotenv').config();
