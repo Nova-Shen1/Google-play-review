@@ -713,42 +713,46 @@ function getLocalIP() {
     return '127.0.0.1';
 }
 
-const os = require('os');
+if (typeof os === 'undefined') {
+    var os = require('os'); 
+}
+
 function getLocalIP() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
+    try {
+        const interfaces = os.networkInterfaces();
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                    return iface.address;
+                }
             }
         }
+    } catch (e) {
+        return '127.0.0.1';
     }
     return '127.0.0.1';
 }
 
-// 核心修改：使用 async 函数包装启动逻辑
+// 使用 async 函数确保模块加载完成后再启动监听
 async function startServer() {
     try {
-        console.log('[INFO] 正在初始化 ESM 模块...');
+        console.log('[INFO] 正在加载 google-play-scraper (ESM)...');
         
-        // 动态加载 google-play-scraper
+        // 动态导入模块以解决 ERR_REQUIRE_ESM 报错
         const gplayModule = await import('google-play-scraper');
-        // 根据模块导出情况，通常使用 .default
         gplay = gplayModule.default || gplayModule;
 
-        console.log('[SUCCESS] google-play-scraper 加载成功');
+        console.log('[SUCCESS] google-play-scraper 模块就绪');
 
+        // Vercel 实际上会自动处理端口，但我们需要 app.listen 来保持进程
         app.listen(PORT, '0.0.0.0', () => {
             const localIP = getLocalIP();
-            console.log(`[SUCCESS] 服务已启动`);
-            console.log(`- 本地访问: http://localhost:${PORT}`);
-            console.log(`- 局域网访问: http://${localIP}:${PORT}`);
+            console.log(`[SUCCESS] 服务已启动: http://${localIP}:${PORT}`);
         });
     } catch (err) {
-        console.error('[FATAL] 服务启动失败:', err);
-        // 在 Vercel 环境下，如果启动失败，日志会打印在这里
+        console.error('[FATAL] 启动失败:', err);
     }
 }
 
-// 执行启动
+// 执行启动函数
 startServer();
