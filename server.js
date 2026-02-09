@@ -1,15 +1,19 @@
 require('dotenv').config();
 
-// --- 彻底删除原本的 if (process.env.HTTP_PROXY) {...} 整个代码块 ---
+// 1. 优先启用全局代理 (必须在其他库加载前尽可能早)
+if (process.env.HTTP_PROXY) {
+    const globalAgent = require('global-agent');
+    process.env.GLOBAL_AGENT_HTTP_PROXY = process.env.HTTP_PROXY;
+    globalAgent.bootstrap();
+    console.log(`[INFO] 全局代理已启用: ${process.env.GLOBAL_AGENT_HTTP_PROXY}`);
+}
 
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const path = require('path');
-// 注意：不要在这里 require('os')，避免和末尾冲突
-
-let gplay;
+const gplayRaw = require('google-play-scraper');
+const gplay = gplayRaw.default || gplayRaw;
 
 // 重试包装函数
 const withRetry = async (fn, retries = 3, delay = 2000) => {
@@ -31,6 +35,7 @@ const withRetry = async (fn, retries = 3, delay = 2000) => {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const path = require('path');
 
 // Middleware
 app.use(cors()); // 允许跨域
@@ -42,17 +47,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ==========================================
 // App 管理 API (跨设备同步)
 // ==========================================
-const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(__dirname, 'data');
-const APPS_FILE = path.join(DATA_DIR, 'apps.json');
-const SNAPSHOTS_FILE = path.join(DATA_DIR, 'review_snapshots.json');
+const APPS_FILE = path.join(__dirname, 'data', 'apps.json');
+const SNAPSHOTS_FILE = path.join(__dirname, 'data', 'review_snapshots.json');
 
-// 只有在非 Vercel 环境下才尝试创建目录
-if (!process.env.VERCEL && !fs.existsSync(DATA_DIR)) {
-    try {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    } catch (e) {
-        console.warn('[WARN] 目录创建失败:', e.message);
-    }
+// 确保 data 目录存在
+if (!fs.existsSync(path.join(__dirname, 'data'))) {
+    fs.mkdirSync(path.join(__dirname, 'data'));
 }
 
 const readSnapshots = () => {
@@ -70,19 +70,8 @@ const writeSnapshots = (data) => {
         fs.writeFileSync(SNAPSHOTS_FILE, JSON.stringify(data, null, 2));
         return true;
     } catch (e) {
-        // 在 Vercel 环境下写入失败是正常的，我们记录日志但不抛出错误
-        console.warn(`[Vercel Write Skip] Snapshots 写入跳过: ${e.message}`);
-        return true; // 返回 true 防止 API 返回 500 错误
-    }
-};
-
-const writeApps = (data) => {
-    try {
-        fs.writeFileSync(APPS_FILE, JSON.stringify(data, null, 2));
-        return true;
-    } catch (e) {
-        console.warn(`[Vercel Write Skip] Apps 写入跳过: ${e.message}`);
-        return true; // 返回 true 让程序继续运行
+        console.error('[ERROR] 写入 snapshots 失败:', e);
+        return false;
     }
 };
 
@@ -711,45 +700,23 @@ app.get('/api/retention-stats', (req, res) => {
     });
 });
 
-const os = require('os'); // 确保这里只有一次声明
-
+// Start Server
+const os = require('os');
 function getLocalIP() {
-    try {
-        const interfaces = os.networkInterfaces();
-        for (const name of Object.keys(interfaces)) {
-            for (const iface of interfaces[name]) {
-                // Node.js 18+ family 属性可能是数字 4
-                if ((iface.family === 'IPv4' || iface.family === 4) && !iface.internal) {
-                    return iface.address;
-                }
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
             }
         }
-    } catch (e) {
-        return '127.0.0.1';
     }
     return '127.0.0.1';
 }
 
-// 使用 async 函数确保 ESM 模块加载完成后再启动监听
-async function startServer() {
-    try {
-        console.log('[INFO] 正在加载 google-play-scraper (ESM)...');
-        
-        // 动态导入模块以解决 ERR_REQUIRE_ESM 报错
-        const gplayModule = await import('google-play-scraper');
-        gplay = gplayModule.default || gplayModule;
-
-        console.log('[SUCCESS] google-play-scraper 模块就绪');
-
-        // 在 Vercel 环境下 PORT 由系统分配
-        app.listen(PORT, '0.0.0.0', () => {
-            const localIP = getLocalIP();
-            console.log(`[SUCCESS] 服务已启动: http://${localIP}:${PORT}`);
-        });
-    } catch (err) {
-        console.error('[FATAL] 启动失败:', err);
-    }
-}
-
-// 执行启动
-startServer();
+app.listen(PORT, '0.0.0.0', () => {
+    const localIP = getLocalIP();
+    console.log(`[SUCCESS] 服务已启动，可供跨机器访问`);
+    console.log(`- 本地访问: http://localhost:${PORT}`);
+    console.log(`- 局域网访问: http://${localIP}:${PORT}`);
+});
