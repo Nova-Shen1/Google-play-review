@@ -2,27 +2,47 @@ const gplayRaw = require('google-play-scraper');
 const gplay = gplayRaw.default || gplayRaw;
 require('dotenv').config();
 
-// 启用全局代理
-if (process.env.HTTP_PROXY) {
-    const globalAgent = require('global-agent');
-    process.env.GLOBAL_AGENT_HTTP_PROXY = process.env.HTTP_PROXY;
-    globalAgent.bootstrap();
-    console.log(`[INFO] 全局代理已启用: ${process.env.GLOBAL_AGENT_HTTP_PROXY}`);
+// --- 修改后的代理逻辑 ---
+// 仅当不在 Vercel 环境且存在代理配置时启用
+if (process.env.HTTP_PROXY && !process.env.VERCEL) {
+    try {
+        const globalAgent = require('global-agent');
+        process.env.GLOBAL_AGENT_HTTP_PROXY = process.env.HTTP_PROXY;
+        globalAgent.bootstrap();
+        console.log(`[LOCAL INFO] 已启用本地代理: ${process.env.HTTP_PROXY}`);
+    } catch (e) {
+        console.warn('[WARN] 无法加载 global-agent，请确保已安装该 npm 包');
+    }
+} else if (process.env.VERCEL) {
+    console.log('[INFO] Vercel 环境：已自动跳过代理配置，直接连接 Google');
 }
 
 async function testGplay() {
     const appId = 'ng.com.fairmoney.fairmoney';
     const country = 'ng';
     
-    console.log(`Testing gplay.reviews for ${appId} in ${country}...`);
+    // 确保 gplay 已经加载（特别是如果你在 server.js 中是动态导入的）
+    if (!gplay) {
+        console.error('Error: gplay 模块尚未加载完成！');
+        return;
+    }
+
+    console.log(`[TEST] 正在请求 Google Play...`);
     
     try {
         const results = await gplay.reviews({
             appId: appId,
             country: country,
-            sort: 2, // NEWEST
+            sort: 2, 
             num: 10
         });
+        
+        // ... 后面的 log 逻辑保持不变
+    } catch (err) {
+        console.error('抓取失败！具体原因:', err.message);
+        // 如果是在 Vercel 看到这个，通常是 appId 不存在或被 Google 暂时封锁 IP
+    }
+}
         
         console.log('Result type:', typeof results, 'Is array:', Array.isArray(results));
         console.log('Result keys:', Object.keys(results));
