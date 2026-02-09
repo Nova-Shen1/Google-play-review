@@ -1,17 +1,12 @@
 require('dotenv').config();
 
-// 1. 优先启用全局代理 (必须在其他库加载前尽可能早)
-if (process.env.HTTP_PROXY) {
-    const globalAgent = require('global-agent');
-    process.env.GLOBAL_AGENT_HTTP_PROXY = process.env.HTTP_PROXY;
-    globalAgent.bootstrap();
-    console.log(`[INFO] 全局代理已启用: ${process.env.GLOBAL_AGENT_HTTP_PROXY}`);
-}
-
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const path = require('path');
+const os = require('os'); // 既然你需要 os，就在这里声明一次
+
 let gplay;
 
 // 重试包装函数
